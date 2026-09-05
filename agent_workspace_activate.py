@@ -33,22 +33,22 @@ def runtime_dir() -> Path:
     return Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
 
 
-def waiting_target(path: Path) -> Target | None:
+def read_target(path: Path) -> tuple[Target, bool] | None:
     try:
         value: Any = json.loads(path.read_text())
     except (OSError, json.JSONDecodeError, UnicodeDecodeError):
         return None
-    if not isinstance(value, dict) or value.get("waiting") is not True:
+    if not isinstance(value, dict) or type(value.get("waiting")) is not bool:
         return None
     workspace = value.get("workspace")
     window = value.get("window")
     if type(workspace) is not int or workspace <= 0:
         return None
-    return workspace, window if type(window) is int and window > 0 else None
+    return (workspace, window if type(window) is int and window > 0 else None), value["waiting"]
 
 
 def waiting_targets(state_dir: Path) -> list[Target]:
-    entries: list[tuple[int, str, Target]] = []
+    entries: list[tuple[int, str, Target, bool]] = []
     try:
         paths = list(state_dir.iterdir())
     except OSError:
@@ -56,23 +56,25 @@ def waiting_targets(state_dir: Path) -> list[Target]:
     for path in paths:
         if len(path.name) != 64 or any(character not in "0123456789abcdef" for character in path.name):
             continue
-        target = waiting_target(path)
-        if target is None:
+        state = read_target(path)
+        if state is None:
             continue
+        target, waiting = state
         try:
             modified = path.stat().st_mtime_ns
         except OSError:
             continue
-        entries.append((modified, path.name, target))
+        entries.append((modified, path.name, target, waiting))
 
     result: list[Target] = []
     seen: set[tuple[str, int]] = set()
-    for _modified, _name, target in sorted(entries):
+    for _modified, _name, target, waiting in sorted(entries, reverse=True):
         workspace, window = target
         key = ("window", window) if window is not None else ("workspace", workspace)
         if key not in seen:
-            result.append(target)
             seen.add(key)
+            if waiting:
+                result.append(target)
     return result
 
 
@@ -141,7 +143,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         formatter_class=argparse.RawTextHelpFormatter,
         epilog=epilog,
-        description="Activate the Tilix workspace whose Codex/Claude prompt has waited longest.",
+        description="Activate the Tilix workspace whose Codex/Claude prompt has waited shortest.",
     )
     parser.add_argument("-n", "--dry-run", "--dry_run", action="store_true")
     parser.add_argument("-v", "--verbose", action="count", default=0)
@@ -183,7 +185,24 @@ def test_waiting_targets(tmp_path: Path) -> None:
     os.utime(old, ns=(10, 10))
     os.utime(new, ns=(20, 20))
     os.utime(same_workspace, ns=(30, 30))
-    assert waiting_targets(tmp_path) == [(3, 30), (2, 20)]
+    assert waiting_targets(tmp_path) == [(4, 30), (2, 20)]
+
+
+def test_latest_window_state_controls_waiting(tmp_path: Path) -> None:
+    old = tmp_path / ("1" * 64)
+    latest = tmp_path / ("2" * 64)
+    other = tmp_path / ("3" * 64)
+    old.write_text('{"workspace":2,"waiting":true,"window":20}\n')
+    latest.write_text('{"workspace":3,"waiting":false,"window":20}\n')
+    other.write_text('{"workspace":3,"waiting":true,"window":30}\n')
+    os.utime(old, ns=(10, 10))
+    os.utime(latest, ns=(30, 30))
+    os.utime(other, ns=(20, 20))
+    assert waiting_targets(tmp_path) == [(3, 30)]
+
+    latest.write_text('{"workspace":3,"waiting":true,"window":20}\n')
+    os.utime(latest, ns=(40, 40))
+    assert waiting_targets(tmp_path) == [(3, 20), (3, 30)]
 
 
 def test_cycle_index() -> None:
