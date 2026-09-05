@@ -1,0 +1,8 @@
+{
+    "uuid": "corner-blink@local",
+    "name": "Corner Blink",
+    "description": "Blink 16x16 red dots in screen corners, including on the lock screen.",
+    "shell-version": ["50"],
+    "session-modes": ["user", "unlock-dialog"],
+    "settings-schema": "org.gnome.shell.extensions.corner-blink"
+}

@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+  <schema id="org.gnome.shell.extensions.corner-blink"
+          path="/org/gnome/shell/extensions/corner-blink/">
+    <key name="size" type="i">
+      <default>16</default>
+      <range min="1" max="512"/>
+      <summary>Dot size (px)</summary>
+    </key>
+
+    <!-- One-shot "flash" driven by an external controller (e.g. fingerprint
+         feedback). Set flash-color/flash-interval/flash-duration, then bump
+         flash-trigger to a new value to flash the corners once. -->
+    <key name="flash-color" type="s">
+      <default>'red'</default>
+      <summary>Flash color (CSS color)</summary>
+    </key>
+    <key name="flash-interval" type="i">
+      <default>200</default>
+      <range min="50" max="10000"/>
+      <summary>Flash blink interval (ms)</summary>
+    </key>
+    <key name="flash-duration" type="i">
+      <default>800</default>
+      <range min="0" max="60000"/>
+      <summary>Flash total duration (ms)</summary>
+    </key>
+    <key name="flash-trigger" type="i">
+      <default>0</default>
+      <range min="0" max="2147483647"/>
+      <summary>Bump to a new value to start a one-shot flash</summary>
+    </key>
+
+    <!-- Steady indicator at the bottom-right corner only (e.g. "fingerprint
+         touch requested"). Non-empty = shown, '' = hidden. -->
+    <key name="indicator-color" type="s">
+      <default>''</default>
+      <summary>Steady bottom-right indicator color (CSS color; '' = hidden)</summary>
+    </key>
+  </schema>
+</schemalist>

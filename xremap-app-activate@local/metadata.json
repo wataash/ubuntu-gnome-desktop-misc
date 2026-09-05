@@ -1,0 +1,6 @@
+{
+    "uuid": "xremap-app-activate@local",
+    "name": "Xremap App Activate",
+    "description": "Expose application activation and focused monitor lookup over D-Bus for xremap.",
+    "shell-version": ["50"]
+}
