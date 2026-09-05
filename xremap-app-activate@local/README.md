@@ -47,10 +47,10 @@ dbus-run-session -- gnome-shell --wayland --devkit --virtual-monitor=1920x1080
 gnome-extensions enable xremap-app-activate@local
 gnome-extensions info xremap-app-activate@local
 
-gdbus call --session --dest org.gnome.Shell --object-path /com/wsh/XremapAppActivate --method com.wsh.XremapAppActivate.Activate code.desktop
+gdbus call --session --dest org.gnome.Shell --object-path /com/wataash/XremapAppActivate --method com.wataash.XremapAppActivate.Activate code.desktop
 # (true,)
 
-gdbus call --session --dest org.gnome.Shell --object-path /com/wsh/XremapAppActivate --method com.wsh.XremapAppActivate.GetFocusedMonitor
+gdbus call --session --dest org.gnome.Shell --object-path /com/wataash/XremapAppActivate --method com.wataash.XremapAppActivate.GetFocusedMonitor
 # ('DP-1',)
 ```
 
@@ -65,9 +65,9 @@ gnome-shell --wayland --devkit &
 gdbus wait --session org.gnome.Shell
 gnome-extensions enable xremap-app-activate@local
 
-gdbus call --session --dest org.gnome.Shell --object-path /com/wsh/XremapAppActivate --method com.wsh.XremapAppActivate.Activate code.desktop
+gdbus call --session --dest org.gnome.Shell --object-path /com/wataash/XremapAppActivate --method com.wataash.XremapAppActivate.Activate code.desktop
 
-gdbus call --session --dest org.gnome.Shell --object-path /com/wsh/XremapAppActivate --method com.wsh.XremapAppActivate.GetFocusedMonitor
+gdbus call --session --dest org.gnome.Shell --object-path /com/wataash/XremapAppActivate --method com.wataash.XremapAppActivate.GetFocusedMonitor
 ```
 
 テスト終了時は `fg` でGNOME Shellをフォアグラウンドへ戻して
@@ -78,7 +78,7 @@ gdbus call --session --dest org.gnome.Shell --object-path /com/wsh/XremapAppActi
 
 ```sh
 # Chrome
-gdbus call --session --dest org.gnome.Shell --object-path /com/wsh/XremapAppActivate --method com.wsh.XremapAppActivate.Activate google-chrome.desktop
+gdbus call --session --dest org.gnome.Shell --object-path /com/wataash/XremapAppActivate --method com.wataash.XremapAppActivate.Activate google-chrome.desktop
 # (true,)
 
 journalctl --user -b /usr/bin/gnome-shell | rg 'Xremap App Activate'
@@ -95,9 +95,9 @@ KATAKANAHIRAGANA-b:
     - --dest
     - org.gnome.Shell
     - --object-path
-    - /com/wsh/XremapAppActivate
+    - /com/wataash/XremapAppActivate
     - --method
-    - com.wsh.XremapAppActivate.Activate
+    - com.wataash.XremapAppActivate.Activate
     - google-chrome.desktop
 ```
 

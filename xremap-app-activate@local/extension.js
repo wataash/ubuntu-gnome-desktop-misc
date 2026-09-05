@@ -1,3 +1,6 @@
+// SPDX-FileCopyrightText: Copyright (c) 2026 Wataru Ashihara <wataash0607@gmail.com>
+// SPDX-License-Identifier: Apache-2.0
+
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
@@ -6,7 +9,7 @@ import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 
 const DBUS_XML = `
 <node>
-  <interface name="com.wsh.XremapAppActivate">
+  <interface name="com.wataash.XremapAppActivate">
     <method name="Activate">
       <arg type="s" direction="in" name="desktop_id"/>
       <arg type="b" direction="out" name="success"/>
@@ -29,7 +32,7 @@ const DBUS_XML = `
 export default class XremapAppActivateExtension extends Extension {
     enable() {
         this._dbus = Gio.DBusExportedObject.wrapJSObject(DBUS_XML, this);
-        this._dbus.export(Gio.DBus.session, '/com/wsh/XremapAppActivate');
+        this._dbus.export(Gio.DBus.session, '/com/wataash/XremapAppActivate');
         this._windowSignals = new Map();
         this._displaySignals = [
             global.display.connect('window-created', (_display, window) => {

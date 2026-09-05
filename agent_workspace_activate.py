@@ -4,7 +4,7 @@
 epilog = r"""
 agent_workspace_activate.py -h
 agent_workspace_activate.py -n
-pytest -v ~/d/s/agent_workspace_activate.py  # @pl
+pytest -v ~/src/ubuntu-gnome-desktop-misc/agent_workspace_activate.py  # @pl
 """[1:]
 
 import argparse
@@ -23,8 +23,8 @@ logger.addHandler(logging.StreamHandler())
 
 DESKTOP_ID = "com.gexperts.Tilix.desktop"
 DBUS_DESTINATION = "org.gnome.Shell"
-DBUS_OBJECT_PATH = "/com/wsh/XremapAppActivate"
-DBUS_INTERFACE = "com.wsh.XremapAppActivate"
+DBUS_OBJECT_PATH = "/com/wataash/XremapAppActivate"
+DBUS_INTERFACE = "com.wataash.XremapAppActivate"
 CYCLE_TIMEOUT_NS = 3_000_000_000
 Target = tuple[int, int | None]
 
