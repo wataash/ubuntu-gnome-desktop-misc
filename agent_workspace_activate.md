@@ -1,5 +1,7 @@
 # agent_workspace_activate.py
 
+agent のプロセスが生存している Tilix だけを候補にする。hook が保存した `agent_process_stat` とホストの `/proc/PID/stat` の PID・起動時刻を照合し、終了済み、ゾンビ、PID 再利用、プロセス情報のない旧記録は除外する。既存セッションは更新後の hook が実行されると再登録される。
+
 Codex / Claude Code が応答を完了してプロンプト待ちになっている workspace のうち、待ち時間が最も短い Tilix window を activate する。3秒以内に再実行すると待機時間が短い順で次の workspace へ進み、最後まで進むと先頭へ戻る。
 
 待機状態は `agent_workspace_speak.py` が `$XDG_RUNTIME_DIR/agent-workspaces/` に保存する。`UserPromptSubmit` では `waiting: false`、`Stop` では `waiting: true` とし、Stop時のfile mtimeを待機開始時刻として使う。同じTilix windowに複数のセッションの記録がある場合は、file mtimeが最新の記録で判定する。最新の記録が `waiting: false` なら、古い待機記録が残っていてもactivateの対象にしない。

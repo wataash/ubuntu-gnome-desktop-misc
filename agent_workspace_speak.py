@@ -171,6 +171,10 @@ def write_state(path: Path, number: int, *, waiting: bool, window: int | None = 
     try:
         with os.fdopen(fd, "w") as file:
             value = {"workspace": number, "waiting": waiting}
+            # The hook supplies host /proc stat before entering sbx's PID namespace.
+            process_stat = os.environ.get("AGENT_PROCESS_STAT")
+            if process_stat:
+                value["agent_process_stat"] = process_stat
             if window is not None:
                 value["window"] = window
             json.dump(value, file, separators=(",", ":"))
@@ -181,10 +185,12 @@ def write_state(path: Path, number: int, *, waiting: bool, window: int | None = 
         raise
 
 
-def test_state_round_trip(tmp_path: Path) -> None:
+def test_state_round_trip(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setenv("AGENT_PROCESS_STAT", "123 (codex) S")
     path = tmp_path / "state"
     write_state(path, 3, waiting=False, window=42)
     assert read_state(path) == (3, False, 42)
+    assert json.loads(path.read_text())["agent_process_stat"] == "123 (codex) S"
     write_state(path, 3, waiting=True, window=42)
     assert read_state(path) == (3, True, 42)
     path.write_text("2\n")

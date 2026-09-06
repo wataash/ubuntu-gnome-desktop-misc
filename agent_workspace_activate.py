@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import shlex
 import subprocess
+import sys
 import time
 from typing import Any
 
@@ -34,6 +35,31 @@ def runtime_dir() -> Path:
     return Path(os.environ.get("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}"))
 
 
+def process_identity(value: Any) -> tuple[int, str] | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        pid, rest = value.split(" (", 1)
+        name, fields = rest.rsplit(") ", 1)
+        stat = fields.split()
+        if name not in {"codex", "claude"} or stat[0] in {"Z", "X"}:
+            return None
+        return int(pid), stat[19]  # /proc/PID/stat field 22: starttime
+    except (ValueError, IndexError):
+        return None
+
+
+def agent_is_alive(value: Any, proc_dir: Path = Path("/proc")) -> bool:
+    identity = process_identity(value)
+    if identity is None:
+        return False
+    try:
+        current = (proc_dir / str(identity[0]) / "stat").read_text()
+    except (OSError, UnicodeDecodeError):
+        return False
+    return process_identity(current) == identity
+
+
 def read_target(path: Path) -> tuple[Target, bool] | None:
     try:
         value: Any = json.loads(path.read_text())
@@ -45,7 +71,8 @@ def read_target(path: Path) -> tuple[Target, bool] | None:
     window = value.get("window")
     if type(workspace) is not int or workspace <= 0:
         return None
-    return (workspace, window if type(window) is int and window > 0 else None), value["waiting"]
+    waiting = value["waiting"] and agent_is_alive(value.get("agent_process_stat"))
+    return (workspace, window if type(window) is int and window > 0 else None), waiting
 
 
 def waiting_targets(state_dir: Path) -> list[Target]:
@@ -186,7 +213,8 @@ def main() -> int:
     return 1
 
 
-def test_waiting_targets(tmp_path: Path) -> None:
+def test_waiting_targets(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(sys.modules[__name__], "agent_is_alive", lambda value: True)
     old = tmp_path / ("1" * 64)
     new = tmp_path / ("2" * 64)
     same_workspace = tmp_path / ("3" * 64)
@@ -203,7 +231,8 @@ def test_waiting_targets(tmp_path: Path) -> None:
     assert waiting_targets(tmp_path) == [(4, 30), (2, 20)]
 
 
-def test_latest_window_state_controls_waiting(tmp_path: Path) -> None:
+def test_latest_window_state_controls_waiting(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(sys.modules[__name__], "agent_is_alive", lambda value: True)
     old = tmp_path / ("1" * 64)
     latest = tmp_path / ("2" * 64)
     other = tmp_path / ("3" * 64)
@@ -226,6 +255,37 @@ def test_cycle_index() -> None:
     assert cycle_index(keys, state, 11) == 1
     assert cycle_index(keys, state, 10 + CYCLE_TIMEOUT_NS + 1) == 0
     assert cycle_index(["window:2", "window:3", "workspace:5"], state, 11) == 0
+
+
+def test_agent_lifetime(tmp_path: Path, monkeypatch: Any) -> None:
+    proc = tmp_path / "proc"
+    process = proc / "123"
+    process.mkdir(parents=True)
+    saved = "123 (codex) S " + "0 " * 18 + "456 0\n"
+    stat = process / "stat"
+    stat.write_text(saved)
+    assert agent_is_alive(saved, proc)
+    assert not agent_is_alive(None, proc)
+    stat.write_text(saved.replace("456", "789"))
+    assert not agent_is_alive(saved, proc)  # Reused PID.
+    stat.write_text(saved.replace(") S", ") Z"))
+    assert not agent_is_alive(saved, proc)
+    stat.write_text(saved.replace("codex", "bash"))
+    assert not agent_is_alive(saved, proc)
+    for invalid in ("", "123 (codex) S", "bad", 123):
+        assert not agent_is_alive(invalid, proc)
+    stat.write_text(saved.replace("codex", "claude"))
+    assert agent_is_alive(saved.replace("codex", "claude"), proc)
+    stat.write_text(saved)
+    real_check = agent_is_alive
+    monkeypatch.setattr(sys.modules[__name__], "agent_is_alive", lambda value: real_check(value, proc))
+    state = tmp_path / ("a" * 64)
+    state.write_text(json.dumps({"workspace": 2, "window": 20, "waiting": True, "agent_process_stat": saved}))
+    assert waiting_targets(tmp_path) == [(2, 20)]
+    stat.unlink()
+    assert waiting_targets(tmp_path) == []  # Tilix can still be open after exit.
+    state.write_text('{"workspace":2,"window":20,"waiting":true}')
+    assert waiting_targets(tmp_path) == []
 
 
 if __name__ == "__main__":
