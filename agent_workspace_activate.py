@@ -26,6 +26,7 @@ DBUS_DESTINATION = "org.gnome.Shell"
 DBUS_OBJECT_PATH = "/com/wataash/XremapAppActivate"
 DBUS_INTERFACE = "com.wataash.XremapAppActivate"
 CYCLE_TIMEOUT_NS = 3_000_000_000
+NO_TARGET_SOUND = "/usr/share/sounds/freedesktop/stereo/message.oga"
 Target = tuple[int, int | None]
 
 
@@ -110,6 +111,19 @@ def write_cycle_state(path: Path, keys: list[str], index: int, now_ns: int) -> N
     path.write_text(json.dumps({"targets": keys, "index": index, "time_ns": now_ns}) + "\n")
 
 
+def play_no_target_sound(*, dry_run: bool) -> None:
+    command = ["pw-play", NO_TARGET_SOUND]
+    rendered = shlex.join(command)
+    logger.info("run: %s", rendered)
+    if dry_run:
+        print(rendered)
+        return
+    try:
+        subprocess.run(command, check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    except OSError as error:
+        logger.error("could not run %s: %s", rendered, error)
+
+
 def activate(target: Target, *, dry_run: bool) -> bool:
     workspace, window = target
     method = "ActivateWindow" if window is not None else "ActivateOnWorkspace"
@@ -153,6 +167,7 @@ def main() -> int:
     base = runtime_dir()
     targets = waiting_targets(base / "agent-workspaces")
     if not targets:
+        play_no_target_sound(dry_run=args.dry_run)
         return 0
     keys = target_keys(targets)
     cycle_path = base / "kana-agent-waiting.json"

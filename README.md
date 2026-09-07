@@ -37,7 +37,7 @@ GNOME Shell 50 / Wayland (Ubuntu) で使っている。`metadata.json` の `shel
 ## 依存
 
 - `agent_workspace_speak.py` … `spd-say` (speech-dispatcher)、`xprop`。`notify` では `pw-play` (PipeWire) も使う。workspace の追跡は Tilix の window を前提にしている
-- `agent_workspace_activate.py` … `gdbus`、`xremap-app-activate@local`
+- `agent_workspace_activate.py` … `gdbus`、`xremap-app-activate@local`、`pw-play` (PipeWire)
 - hook を sandbox 越しに実行する場合は sbx を使う: https://github.com/wataash/sbx-bwrap-wrapper 。必須ではなく、`python3 agent_workspace_speak.py remember` のように直接実行してもよい
 
 ## ライセンス
