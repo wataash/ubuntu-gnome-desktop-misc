@@ -17,18 +17,18 @@ import subprocess
 import sys
 import time
 from typing import Any
+from uuid import UUID
 
 
 logger = logging.getLogger(__name__)
 logger.addHandler(logging.StreamHandler())
 
-DESKTOP_ID = "com.gexperts.Tilix.desktop"
 DBUS_DESTINATION = "org.gnome.Shell"
 DBUS_OBJECT_PATH = "/com/wataash/XremapAppActivate"
 DBUS_INTERFACE = "com.wataash.XremapAppActivate"
 CYCLE_TIMEOUT_NS = 3_000_000_000
 NO_TARGET_SOUND = "/usr/share/sounds/freedesktop/stereo/message.oga"
-Target = tuple[int, int | None]
+Target = tuple[int, int] | str  # Legacy window or Tilix terminal UUID.
 
 
 def runtime_dir() -> Path:
@@ -60,19 +60,39 @@ def agent_is_alive(value: Any, proc_dir: Path = Path("/proc")) -> bool:
     return process_identity(current) == identity
 
 
-def read_target(path: Path) -> tuple[Target, bool] | None:
-    try:
-        value: Any = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
+def agent_terminal(value: Any, proc_dir: Path = Path("/proc")) -> str | None:
+    identity = process_identity(value)
+    if identity is None or not agent_is_alive(value, proc_dir):
         return None
+    try:
+        environment = (proc_dir / str(identity[0]) / "environ").read_bytes()
+        for entry in environment.split(b"\0"):
+            if entry.startswith(b"TILIX_ID="):
+                terminal = str(UUID(entry.removeprefix(b"TILIX_ID=").decode("ascii")))
+                return terminal if agent_is_alive(value, proc_dir) else None
+    except (OSError, ValueError, UnicodeDecodeError):
+        pass
+    return None
+
+
+def read_target(path: Path) -> tuple[Target, bool] | None:
+    value = read_json(path)
     if not isinstance(value, dict) or type(value.get("waiting")) is not bool:
         return None
+    process_stat = value.get("agent_process_stat")
+    terminal = agent_terminal(process_stat)
+    window_state = read_json(path.parent / "window-state.json")
+    if terminal is not None and isinstance(window_state, dict) and window_state.get("terminal_activation") is True:
+        return terminal, value["waiting"]
     workspace = value.get("workspace")
     window = value.get("window")
     if type(workspace) is not int or workspace <= 0:
         return None
-    waiting = value["waiting"] and agent_is_alive(value.get("agent_process_stat"))
-    return (workspace, window if type(window) is int and window > 0 else None), waiting
+    # A workspace alone cannot identify the Tilix that owns the agent.
+    if type(window) is not int or window <= 0:
+        return None
+    waiting = value["waiting"] and agent_is_alive(process_stat)
+    return (workspace, window), waiting
 
 
 def waiting_targets(state_dir: Path) -> list[Target]:
@@ -95,10 +115,9 @@ def waiting_targets(state_dir: Path) -> list[Target]:
         entries.append((modified, path.name, target, waiting))
 
     result: list[Target] = []
-    seen: set[tuple[str, int]] = set()
+    seen: set[str] = set()
     for _modified, _name, target, waiting in sorted(entries, reverse=True):
-        workspace, window = target
-        key = ("window", window) if window is not None else ("workspace", workspace)
+        key = target_key(target)
         if key not in seen:
             seen.add(key)
             if waiting:
@@ -106,8 +125,12 @@ def waiting_targets(state_dir: Path) -> list[Target]:
     return result
 
 
+def target_key(target: Target) -> str:
+    return f"terminal:{target}" if isinstance(target, str) else f"window:{target[1]}"
+
+
 def target_keys(targets: list[Target]) -> list[str]:
-    return [f"window:{window}" if window is not None else f"workspace:{workspace}" for workspace, window in targets]
+    return [target_key(target) for target in targets]
 
 
 def cycle_index(keys: list[str], cycle_state: Any, now_ns: int) -> int:
@@ -152,20 +175,14 @@ def play_no_target_sound(*, dry_run: bool) -> None:
 
 
 def activate(target: Target, *, dry_run: bool) -> bool:
-    workspace, window = target
-    method = "ActivateWindow" if window is not None else "ActivateOnWorkspace"
-    arguments = [str(window)] if window is not None else [DESKTOP_ID, str(workspace - 1)]
+    if isinstance(target, str):
+        method, argument = "ActivateTerminal", target
+    else:
+        method, argument = "ActivateWindow", str(target[1])
     command = [
-        "/bin/gdbus",
-        "call",
-        "--session",
-        "--dest",
-        DBUS_DESTINATION,
-        "--object-path",
-        DBUS_OBJECT_PATH,
-        "--method",
-        f"{DBUS_INTERFACE}.{method}",
-        *arguments,
+        "/bin/gdbus", "call", "--session", "--dest", DBUS_DESTINATION,
+        "--object-path", DBUS_OBJECT_PATH, "--method",
+        f"{DBUS_INTERFACE}.{method}", argument,
     ]
     rendered = shlex.join(command)
     logger.info("run: %s", rendered)
@@ -250,11 +267,33 @@ def test_latest_window_state_controls_waiting(tmp_path: Path, monkeypatch: Any) 
 
 
 def test_cycle_index() -> None:
-    keys = ["window:3", "window:2", "workspace:5"]
+    keys = ["window:3", "window:2", "window:5"]
     state = {"targets": keys, "index": 0, "time_ns": 10}
     assert cycle_index(keys, state, 11) == 1
     assert cycle_index(keys, state, 10 + CYCLE_TIMEOUT_NS + 1) == 0
-    assert cycle_index(["window:2", "window:3", "workspace:5"], state, 11) == 0
+    assert cycle_index(["window:2", "window:3", "window:5"], state, 11) == 0
+
+
+def test_waiting_targets_require_window(tmp_path: Path, monkeypatch: Any) -> None:
+    monkeypatch.setattr(sys.modules[__name__], "agent_is_alive", lambda value: True)
+    state = tmp_path / ("a" * 64)
+    value = {"workspace": 1, "waiting": True}
+    state.write_text(json.dumps(value))
+    assert waiting_targets(tmp_path) == []
+    for window in (None, 0, -1, True, "4"):
+        state.write_text(json.dumps({**value, "window": window}))
+        assert waiting_targets(tmp_path) == []
+    state.write_text(json.dumps({**value, "window": 4}))
+    assert waiting_targets(tmp_path) == [(1, 4)]
+
+
+def test_activate_window_dry_run(capsys: Any) -> None:
+    assert activate((1, 4), dry_run=True)
+    assert capsys.readouterr().out.strip() == (
+        "/bin/gdbus call --session --dest org.gnome.Shell "
+        "--object-path /com/wataash/XremapAppActivate "
+        "--method com.wataash.XremapAppActivate.ActivateWindow 4"
+    )
 
 
 def test_agent_lifetime(tmp_path: Path, monkeypatch: Any) -> None:
@@ -278,7 +317,7 @@ def test_agent_lifetime(tmp_path: Path, monkeypatch: Any) -> None:
     assert agent_is_alive(saved.replace("codex", "claude"), proc)
     stat.write_text(saved)
     real_check = agent_is_alive
-    monkeypatch.setattr(sys.modules[__name__], "agent_is_alive", lambda value: real_check(value, proc))
+    monkeypatch.setattr(sys.modules[__name__], "agent_is_alive", lambda value, proc_dir=None: real_check(value, proc))
     state = tmp_path / ("a" * 64)
     state.write_text(json.dumps({"workspace": 2, "window": 20, "waiting": True, "agent_process_stat": saved}))
     assert waiting_targets(tmp_path) == [(2, 20)]
@@ -286,6 +325,49 @@ def test_agent_lifetime(tmp_path: Path, monkeypatch: Any) -> None:
     assert waiting_targets(tmp_path) == []  # Tilix can still be open after exit.
     state.write_text('{"workspace":2,"window":20,"waiting":true}')
     assert waiting_targets(tmp_path) == []
+
+
+def test_terminal_survives_window_change(tmp_path: Path, monkeypatch: Any, capsys: Any) -> None:
+    proc = tmp_path / "proc"
+    process = proc / "123"
+    process.mkdir(parents=True)
+    saved = "123 (codex) S " + "0 " * 18 + "456 0\n"
+    stat = process / "stat"
+    stat.write_text(saved)
+    terminal = "12345678-1234-1234-1234-123456789abc"
+    environment = process / "environ"
+    environment.write_bytes(f"TERM=xterm\0TILIX_ID={terminal}\0".encode())
+    assert agent_terminal(saved, proc) == terminal
+    real_terminal = agent_terminal
+    monkeypatch.setattr(sys.modules[__name__], "agent_terminal", lambda value: real_terminal(value, proc))
+    state = tmp_path / ("a" * 64)
+    value = {"workspace": 2, "window": 267, "waiting": True, "agent_process_stat": saved}
+    state.write_text(json.dumps(value))
+    window_state = tmp_path / "window-state.json"
+    window_state.write_text('{"windows":{"71":2},"focused":null,"terminal_activation":true}')
+    assert waiting_targets(tmp_path) == [terminal]
+    assert target_keys([terminal]) == [f"terminal:{terminal}"]
+    assert activate(terminal, dry_run=True)
+    command = shlex.split(capsys.readouterr().out.strip())
+    assert command[-3:] == ["--method", f"{DBUS_INTERFACE}.ActivateTerminal", terminal]
+    window_state.write_text('{"windows":{"267":2},"focused":null}')
+    real_alive = agent_is_alive
+    monkeypatch.setattr(sys.modules[__name__], "agent_is_alive", lambda value, proc_dir=None: real_alive(value, proc))
+    assert waiting_targets(tmp_path) == [(2, 267)]  # Extension not reloaded yet.
+    window_state.write_text('{"windows":{"71":2},"focused":null,"terminal_activation":true}')
+    newer = tmp_path / ("b" * 64)
+    newer.write_text(json.dumps({**value, "window": 71, "waiting": False}))
+    os.utime(state, ns=(10, 10))
+    os.utime(newer, ns=(20, 20))
+    assert waiting_targets(tmp_path) == []
+    stat.write_text(saved.replace("456", "789"))
+    assert real_terminal(saved, proc) is None
+    stat.write_text(saved)
+    for data in (b"TERM=xterm\0", b"TILIX_ID=invalid'\0", b"TILIX_ID=\xff\0"):
+        environment.write_bytes(data)
+        assert real_terminal(saved, proc) is None
+    environment.unlink()
+    assert real_terminal(saved, proc) is None
 
 
 if __name__ == "__main__":

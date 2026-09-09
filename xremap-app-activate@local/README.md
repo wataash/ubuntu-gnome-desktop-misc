@@ -11,7 +11,9 @@ windowのstable sequenceを指定したactivateと、Tilix windowごとの現在
 application IDを引数で渡せるため、アプリ数に上限はない。
 `ActivateOnWorkspace` のworkspace indexは0始まり。該当windowがなければ起動はせずfalseを返す。
 `ActivateWindow` は `Meta.Window.get_stable_sequence()` の値を受け取り、windowをworkspace間で移動した後も同じwindowをactivateする。
+`ActivateTerminal` は Tilix の terminal UUID を受け取り、`Shell.App.activate_action()` で compositor が発行した activation token を付けて `activate-terminal` を呼ぶ。Wayland のフォーカス抑止で通知だけになることを防ぐ。時刻は `global.display.get_current_time_roundtrip()` で取得する。戻り値は D-Bus 呼び出しの成功を示し、存在しない terminal UUID の検出はできない。
 Tilix windowのstable sequence、1始まりのworkspace番号、focused windowは `$XDG_RUNTIME_DIR/agent-workspaces/window-state.json` に保存する。
+同ファイルの `terminal_activation: true` は `ActivateTerminal` が利用可能なことを示す。
 
 ## 導入
 
@@ -26,53 +28,45 @@ gnome-extensions info xremap-app-activate@local
 
 ## 再ログインせずにテスト
 
-専用のD-BusセッションとネストしたGNOME Shellを起動する。
-通常のGNOME Shellは終了しない。
+専用の D-Bus、runtime directory、メモリ上の GSettings を使う。
+通常セッションの `agent-workspaces/` や xremap socket を共有しないため、
+検証対象の拡張だけを有効にする。`xremap@k0kubun.com` は有効にしない。
+`--devkit` の表示にはホストの Wayland と PipeWire への接続が必要。
+
+次の起動コマンドは Fish / Bash 共通。通常セッションの `WAYLAND_DISPLAY` が
+`wayland-0` のような相対名の場合の例。
 
 ```sh
-dbus-run-session -- gnome-shell --wayland --devkit
-```
+mkdir -p /tmp/xremap-activate-test/
+chmod 700 /tmp/xremap-activate-test/
+WAYLAND_DISPLAY="$XDG_RUNTIME_DIR/$WAYLAND_DISPLAY" PIPEWIRE_RUNTIME_DIR="$XDG_RUNTIME_DIR" XDG_RUNTIME_DIR=/tmp/xremap-activate-test/ GSETTINGS_BACKEND=memory dbus-run-session -- bash
 
-モニタ取得をテストするときは仮想モニタを明示する。
-
-```sh
-dbus-run-session -- gnome-shell --wayland --devkit --virtual-monitor=1920x1080
-```
-
-ネストしたGNOME Shell内で端末を開き、拡張を有効化してテストする。
-この端末から実行すれば、`gdbus --session` はネストしたGNOME Shellの
-セッションバスへ接続する。
-
-```sh
+# ここから専用 D-Bus セッション内の Bash
+# 親 Wayland 上に検証用 GNOME ウィンドウを表示する
+gnome-shell --wayland --devkit --wayland-display=qa-wayland --virtual-monitor=1024x768 --mode=user &
+gdbus wait --session org.gnome.Shell
 gnome-extensions enable xremap-app-activate@local
 gnome-extensions info xremap-app-activate@local
 
-gdbus call --session --dest org.gnome.Shell --object-path /com/wataash/XremapAppActivate --method com.wataash.XremapAppActivate.Activate code.desktop
-# (true,)
+# 検証用 GNOME の Wayland socket に Tilix を接続する
+WAYLAND_DISPLAY=qa-wayland GDK_BACKEND=wayland tilix
 
-gdbus call --session --dest org.gnome.Shell --object-path /com/wataash/XremapAppActivate --method com.wataash.XremapAppActivate.GetFocusedMonitor
-# ('DP-1',)
+# テスト終了時は検証用 GNOME だけを終了し、専用シェルを抜ける
+fg
+# Ctrl-C
+exit
 ```
 
-ホスト側の端末で直接 `gdbus` も実行したい場合は、先に
-`dbus-run-session` 内の対話シェルへ入る。
+検証用 Tilix 内の `TILIX_ID` を使って `ActivateTerminal` を呼び、
+専用 runtime の `agent-workspaces/window-state.json` の `focused` が対象 window に変わることを確認する。
+D-Bus の `(true,)` だけではフォーカス成功の確認にならない。
+コードを変更したら検証用 GNOME だけを再起動する。
 
-```sh
-dbus-run-session -- bash
+2026-09-09、GNOME 50.1 の表示付き nested Wayland で確認済み:
 
-# ここから専用D-Busセッション内
-gnome-shell --wayland --devkit &
-gdbus wait --session org.gnome.Shell
-gnome-extensions enable xremap-app-activate@local
-
-gdbus call --session --dest org.gnome.Shell --object-path /com/wataash/XremapAppActivate --method com.wataash.XremapAppActivate.Activate code.desktop
-
-gdbus call --session --dest org.gnome.Shell --object-path /com/wataash/XremapAppActivate --method com.wataash.XremapAppActivate.GetFocusedMonitor
-```
-
-テスト終了時は `fg` でGNOME Shellをフォアグラウンドへ戻して
-`Ctrl-C` で終了し、対話シェルも `exit` する。
-コードを再変更した場合は、ネストしたGNOME Shellだけを再起動する。
+- `ActivateTerminal` による2つの Tilix 間のフォーカス移動（1 → 2 → 1）。
+- 生存中のテスト用 agent プロセスと terminal UUID、存在しない保存済み window ID を使った `agent_workspace_activate.py` の巡回（2 → 1 → 2）。
+- 通常セッションの xremap socket は検証前後で変更なし。
 
 ## 動作確認
 

@@ -23,6 +23,10 @@ const DBUS_XML = `
       <arg type="u" direction="in" name="stable_sequence"/>
       <arg type="b" direction="out" name="success"/>
     </method>
+    <method name="ActivateTerminal">
+      <arg type="s" direction="in" name="terminal_uuid"/>
+      <arg type="b" direction="out" name="success"/>
+    </method>
     <method name="GetFocusedMonitor">
       <arg type="s" direction="out" name="connector"/>
     </method>
@@ -111,6 +115,27 @@ export default class XremapAppActivateExtension extends Extension {
         return true;
     }
 
+    ActivateTerminalAsync([terminalUuid], invocation) {
+        const app = Shell.AppSystem.get_default().lookup_app('com.gexperts.Tilix.desktop');
+        if (!app || !/^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(terminalUuid)) {
+            invocation.return_value(new GLib.Variant('(b)', [false]));
+            return;
+        }
+        // Shell supplies a compositor-issued activation token for Wayland.
+        // Calling Tilix directly without it only raises an "is ready" notice.
+        app.activate_action('activate-terminal',
+            new GLib.Variant('av', [new GLib.Variant('s', terminalUuid)]),
+            global.display.get_current_time_roundtrip(), -1, null, (source, result) => {
+                let success = false;
+                try {
+                    success = source.activate_action_finish(result);
+                } catch (error) {
+                    console.error(`[Xremap App Activate] ${error.message}`);
+                }
+                invocation.return_value(new GLib.Variant('(b)', [success]));
+            });
+    }
+
     _tilixWindows() {
         return global.get_window_actors()
             .map(actor => actor.meta_window)
@@ -148,7 +173,7 @@ export default class XremapAppActivateExtension extends Extension {
         const file = Gio.File.new_for_path(GLib.build_filenamev([directory, 'window-state.json']));
         try {
             file.replace_contents(
-                JSON.stringify({focused: focusedSequence, windows}) + '\n',
+                JSON.stringify({focused: focusedSequence, windows, terminal_activation: true}) + '\n',
                 null,
                 false,
                 Gio.FileCreateFlags.REPLACE_DESTINATION,

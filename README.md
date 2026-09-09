@@ -7,7 +7,7 @@ Ubuntu の GNOME Shell (Wayland) 向けに書いた自作の拡張とスクリ�
 | [`corner-blink@local/`](corner-blink@local/) | 画面四隅に点を点滅表示する GNOME Shell 拡張。外部プロセスから GSettings 経由で一度だけ点滅させたり、右下隅に常時表示の点を出したりできる。ロック画面でも動く |
 | [`xremap-app-activate@local/`](xremap-app-activate@local/) | application ID や window の stable sequence を指定して window を activate する D-Bus メソッドを GNOME Shell 内から提供する拡張。focused window のモニタ名も取得できる |
 | `agent_workspace_speak.py` | Codex / Claude Code の hook から使い、タスクを送信した workspace の番号を完了時に読み上げる |
-| `agent_workspace_activate.py` | プロンプト待ちの workspace のうち、待ち時間が最も短いものへ切り替える。連続実行で次の候補へ回る |
+| `agent_workspace_activate.py` | プロンプト待ちの Tilix terminal のうち、待ち時間が最も短いものへ切り替える。連続実行で次の候補へ回る |
 
 各コンポーネントの詳細は、それぞれの `README.md` と `agent_workspace_*.md` を参照。
 
