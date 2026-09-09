@@ -1,6 +1,6 @@
 {
     "uuid": "xremap-app-activate@local",
     "name": "Xremap App Activate",
-    "description": "Expose application activation and focused monitor lookup over D-Bus for xremap.",
+    "description": "Application activation, focused monitor lookup, and workspace titles from Tilix shells and agents.",
     "shell-version": ["50"]
 }

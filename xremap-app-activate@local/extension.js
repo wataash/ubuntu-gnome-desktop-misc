@@ -6,6 +6,7 @@ import GLib from 'gi://GLib';
 import Shell from 'gi://Shell';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
+import {WorkspaceTitles} from './workspaceTitles.js';
 
 const DBUS_XML = `
 <node>
@@ -35,6 +36,8 @@ const DBUS_XML = `
 
 export default class XremapAppActivateExtension extends Extension {
     enable() {
+        this._shellSession = GLib.uuid_string_random();
+        this._titles = new WorkspaceTitles(this._shellSession);
         this._dbus = Gio.DBusExportedObject.wrapJSObject(DBUS_XML, this);
         this._dbus.export(Gio.DBus.session, '/com/wataash/XremapAppActivate');
         this._windowSignals = new Map();
@@ -56,6 +59,8 @@ export default class XremapAppActivateExtension extends Extension {
     }
 
     disable() {
+        this._titles?.destroy();
+        this._titles = null;
         for (const signal of this._displaySignals ?? [])
             global.display.disconnect(signal);
         for (const [window, signals] of this._windowSignals ?? [])
@@ -173,7 +178,7 @@ export default class XremapAppActivateExtension extends Extension {
         const file = Gio.File.new_for_path(GLib.build_filenamev([directory, 'window-state.json']));
         try {
             file.replace_contents(
-                JSON.stringify({focused: focusedSequence, windows, terminal_activation: true}) + '\n',
+                JSON.stringify({focused: focusedSequence, windows, terminal_activation: true, shell_session: this._shellSession}) + '\n',
                 null,
                 false,
                 Gio.FileCreateFlags.REPLACE_DESTINATION,
@@ -182,6 +187,7 @@ export default class XremapAppActivateExtension extends Extension {
         } catch (error) {
             console.error(`[Xremap App Activate] Could not save window state: ${error.message}`);
         }
+        this._titles?.refresh();
     }
 
     GetFocusedMonitor() {
