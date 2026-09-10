@@ -7,6 +7,7 @@ import Shell from 'gi://Shell';
 import {Extension} from 'resource:///org/gnome/shell/extensions/extension.js';
 import * as Main from 'resource:///org/gnome/shell/ui/main.js';
 import {WorkspaceTitles} from './workspaceTitles.js';
+import {parseTilixCwd, TILIX_CWD_TITLE} from './tilixCwd.js';
 
 const DBUS_XML = `
 <node>
@@ -30,6 +31,9 @@ const DBUS_XML = `
     </method>
     <method name="GetFocusedMonitor">
       <arg type="s" direction="out" name="connector"/>
+    </method>
+    <method name="OpenTilixCwdInCode">
+      <arg type="b" direction="out" name="success"/>
     </method>
   </interface>
 </node>`;
@@ -139,6 +143,32 @@ export default class XremapAppActivateExtension extends Extension {
                 }
                 invocation.return_value(new GLib.Variant('(b)', [success]));
             });
+    }
+
+    OpenTilixCwdInCode() {
+        // Capture the focused window once; never fall back to another Tilix window.
+        const window = global.display.focus_window;
+        if (!window || !this._isTilixWindow(window))
+            return false;
+        try {
+            const settings = new Gio.Settings({schema_id: 'com.gexperts.Tilix.Settings'});
+            if (settings.get_string('app-title') !== TILIX_CWD_TITLE)
+                throw new Error('Tilix の app-title に cwd 取得用の形式を設定してください。');
+            const cwd = parseTilixCwd(window.get_title(), GLib.get_host_name());
+            const folder = Gio.File.new_for_path(cwd);
+            if (folder.query_file_type(Gio.FileQueryInfoFlags.NONE, null) !== Gio.FileType.DIRECTORY)
+                throw new Error('Tilix の cwd が存在しないか、ディレクトリではありません。');
+            // GAppInfo expands %f into one argv entry. No title text is shell code.
+            const app = Gio.AppInfo.create_from_commandline(
+                '/bin/code --new-window %f', 'VS Code', Gio.AppInfoCreateFlags.NONE);
+            const context = global.create_app_launch_context(
+                global.display.get_current_time_roundtrip(), window.get_workspace().index());
+            return app.launch([folder], context);
+        } catch (error) {
+            console.error(`[Xremap App Activate] ${error.message}`);
+            Main.notify('Tilix → VS Code', error.message);
+            return false;
+        }
     }
 
     _tilixWindows() {

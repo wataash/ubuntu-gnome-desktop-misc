@@ -96,3 +96,61 @@ KATAKANAHIRAGANA-b:
 ```
 
 system service構成ではユーザーセッション側のlaunch bridgeが必要。
+
+## Tilix のアクティブな cwd を VS Code で開く
+
+`Ctrl＋かな＋v` は `OpenTilixCwdInCode()` を呼び、呼び出し時にフォーカスしている
+Tilix ウィンドウのアクティブなタブ・ペインの cwd を VS Code の新規ウィンドウで開く。
+Tilix 以外にフォーカスしているときは何もしない。既存の `かな＋v` と `Shift＋かな＋v` は別操作。
+fish の bind やプロセスの `/proc/PID/cwd` は使わず、Codex などが実行中でも利用できる。
+取得するのは Tilix が OSC 7 で把握した cwd。子コマンドに指定された作業ディレクトリは追跡しない。
+
+Tilix の `app-title` に、次の形式を設定する。ウィンドウの見出しにもホスト名とフルパスが表示される。
+設定は全 Tilix ウィンドウに適用されるが、フォルダーの既定アプリは変更しない。
+拡張のインストール先はこのディレクトリへの symlink。コード反映後は再ログインする。
+xremap のホーム側と `~/d/ho/` 側を同期し、`/etc/` への配置は xremap の README に従う。
+
+以下は Fish / Bash 共通。
+
+```sh
+# cwd の取得形式を設定（通常セッション）
+gsettings set com.gexperts.Tilix.Settings app-title 'Tilix [code-cwd:${hostname}] ${directory} [code-cwd-end]'
+# フォーカス中の Tilix に対して実行。成功時は (true,)
+gdbus call --session --dest org.gnome.Shell --object-path /com/wataash/XremapAppActivate --method com.wataash.XremapAppActivate.OpenTilixCwdInCode
+# 導入前のタイトルへ戻す（その後この操作は false を返す）
+gsettings set com.gexperts.Tilix.Settings app-title '${appName}: ${sessionName}'
+```
+
+`Meta.Window.get_title()` から全体を読み、形式・ローカルホスト名・絶対パス・ディレクトリの存在を確認する。
+過去のタイトルや別ウィンドウの状態にはフォールバックしない。
+GAppInfo に固定の `/bin/code --new-window %f` と `Gio.File` を別々に渡すため、
+空白・日本語・引用符・`$()` などはパスの一部であり、シェルとして実行しない。
+絶対パスのみを許可するため、パスが CLI オプションとして解釈されることもない。
+GNOME の launch context を渡して Wayland の activation に対応する。
+
+タイトルの扱いと制限:
+
+- Tilix は cwd の更新とフォーカスペイン・タブの変更でタイトルを更新する。
+  見出しの表示上の省略や非表示は、取得するウィンドウタイトルとは別。
+- Codex や fish が送る端末タイトル（OSC 0/2）、端末の手動タイトル、セッション名は取得形式に含めない。
+  **ウィンドウタイトル自体の手動上書きは使わない**。通常の手動タイトルは形式不一致となる。
+  cwd 取得形式を模した固定タイトルも設定しないこと。動的な cwd との区別はできない。
+- SSH 先のホスト名が入ったタイトルは拒否する。`${directory}` は remote cwd にも切り替わるため、
+  `terminal-file-browser` の `currentLocalDirectory` と完全には同じでない。
+- cwd 通知がない端末・消えたディレクトリ・制御文字を含むパスは開かない。
+  Tilix の変数記法 `${...}` を含むディレクトリ名は対象外。
+  特に `${sessionName}`・`${sessionNumber}`・`${sessionCount}` は Tilix 自身が cwd 挿入後にも展開するため、元の名前を復元できない。
+- D-Bus 呼び出しが Shell に届いた時点のフォーカスが対象。キー押下直後に別のウィンドウへ切り替えると対象も変わり得る。
+
+取得仕様の根拠: [Tilix title documentation](https://gnunn1.github.io/tilix-web/manual/title/)、
+[`terminal.d`](https://github.com/gnunn1/tilix/blob/master/source/gx/tilix/terminal/terminal.d) の `replaceVariables`・cwd 通知処理、
+[`session.d`](https://github.com/gnunn1/tilix/blob/master/source/gx/tilix/session.d) の `getDisplayText`、
+[`appwindow.d`](https://github.com/gnunn1/tilix/blob/master/source/gx/tilix/appwindow.d) の `getDisplayTitle`・`updateTitle`。
+
+検証: `node tests/test_tilix_cwd.mjs`（repo root、Fish / Bash 共通）。
+実機の GNOME 50 / Tilix 1.9.6 の `gnome-shell --wayland --devkit` では、
+専用 D-Bus・runtime・GSettings と起動引数記録用コマンドを使い、2 ウィンドウ・2 タブ・分割ペイン間の
+切り替え、実行中コマンドからの cwd 通知、空白・日本語・シェル特殊文字・長いパス、別ホスト・存在しない cwd の拒否を確認した。
+さらに専用 user-data-dir の実際の VS Code で、特殊文字を含む対象フォルダーだけが新規ウィンドウに開くことと、
+VS Code にフォーカスした状態での呼び出しが false になることを確認した。
+自動テストでは `ActivateTerminal` の受付後、対象タイトルへの更新を待ってから呼び出す。
