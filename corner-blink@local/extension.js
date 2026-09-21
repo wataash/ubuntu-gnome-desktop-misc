@@ -17,6 +17,7 @@ export default class CornerBlinkExtension extends Extension {
         this._triggerId = this._settings.connect('changed::flash-trigger', () => this._flash());
         // Steady bottom-right indicator while indicator-color is non-empty.
         this._indicatorId = this._settings.connect('changed::indicator-color', () => this._updateIndicator());
+        this._sizeId = this._settings.connect('changed::size', () => this._updateIndicator());
         this._monitorsId = Main.layoutManager.connect('monitors-changed', () => this._updateIndicator());
         this._updateIndicator();
     }
@@ -125,6 +126,10 @@ export default class CornerBlinkExtension extends Extension {
         if (this._indicatorId) {
             this._settings.disconnect(this._indicatorId);
             this._indicatorId = null;
+        }
+        if (this._sizeId) {
+            this._settings.disconnect(this._sizeId);
+            this._sizeId = null;
         }
         if (this._triggerId) {
             this._settings.disconnect(this._triggerId);
